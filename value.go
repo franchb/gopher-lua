@@ -201,6 +201,7 @@ type LState struct {
 	rhook        Hooker
 	cthook       Hooker
 	prevline     int
+	hasHooks     bool // combined flag for lhook || cthook to optimize main loop
 }
 
 func (ls *LState) String() string   { return fmt.Sprintf("thread: %p", ls) }

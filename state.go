@@ -481,12 +481,18 @@ func (rg *registry) CopyRange(regv, start, limit, n int) { // +inline-start
 	if limit == -1 || limit > rg.top {
 		limit = rg.top
 	}
-	for i := 0; i < n; i++ {
-		srcIdx := start + i
-		if srcIdx >= limit || srcIdx < 0 {
-			rg.array[regv+i] = LNil
-		} else {
-			rg.array[regv+i] = rg.array[srcIdx]
+	// Fast path: entire source range is valid, use copy() builtin
+	if start >= 0 && start+n <= limit {
+		copy(rg.array[regv:regv+n], rg.array[start:start+n])
+	} else {
+		// Slow path for boundary handling
+		for i := 0; i < n; i++ {
+			srcIdx := start + i
+			if srcIdx >= limit || srcIdx < 0 {
+				rg.array[regv+i] = LNil
+			} else {
+				rg.array[regv+i] = rg.array[srcIdx]
+			}
 		}
 	}
 
@@ -927,6 +933,18 @@ func (ls *LState) rkString(idx int) string {
 	}
 	return string(ls.reg.array[ls.currentFrame.LocalBase+idx].(LString))
 }
+
+// kValue returns a constant value (for opcodes known to access constants)
+// This skips the bitwise check that rkValue does
+func (ls *LState) kValue(idx int) LValue { // +inline-start
+	return ls.currentFrame.Fn.Proto.Constants[idx]
+} // +inline-end
+
+// rValue returns a register value (for opcodes known to access registers)
+// This skips the bitwise check that rkValue does
+func (ls *LState) rValue(idx int) LValue { // +inline-start
+	return ls.reg.array[ls.currentFrame.LocalBase+idx]
+} // +inline-end
 
 func (ls *LState) closeUpvalues(idx int) { // +inline-start
 	if ls.uvcache != nil {
@@ -1888,6 +1906,8 @@ func (ls *LState) SetHook(callback *LFunction, event string, count int) error {
 			return newApiErrorS(ApiErrorRun, fmt.Sprintf("invalid hook event: %c", c))
 		}
 	}
+	// Update combined hook flag for main loop optimization
+	ls.hasHooks = ls.lhook != nil || ls.cthook != nil
 	return nil
 }
 
