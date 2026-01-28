@@ -24,11 +24,14 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		cf = L.currentFrame
 		inst = cf.Fn.Proto.Code[cf.Pc]
 		cf.Pc++
-		if L.lhook != nil {
-			L.lhook.call(L, cf)
-		}
-		if L.cthook != nil {
-			L.cthook.call(L, cf)
+		// Use combined hasHooks flag to optimize the common case (no hooks)
+		if L.hasHooks {
+			if L.lhook != nil {
+				L.lhook.call(L, cf)
+			}
+			if L.cthook != nil {
+				L.cthook.call(L, cf)
+			}
 		}
 		if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
 			return
@@ -59,11 +62,14 @@ func mainLoopWithContext(L *LState, baseframe *callFrame) {
 			L.RaiseError("%s", L.ctx.Err().Error())
 			return
 		default:
-			if L.lhook != nil {
-				L.lhook.call(L, cf)
-			}
-			if L.cthook != nil {
-				L.cthook.call(L, cf)
+			// Use combined hasHooks flag to optimize the common case (no hooks)
+			if L.hasHooks {
+				if L.lhook != nil {
+					L.lhook.call(L, cf)
+				}
+				if L.cthook != nil {
+					L.cthook.call(L, cf)
+				}
 			}
 			if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
 				return
@@ -368,12 +374,12 @@ func init() {
 			// +inline-call reg.Set RA+1 selfobj
 			return 0
 		},
-		opArith, // OP_ADD
-		opArith, // OP_SUB
-		opArith, // OP_MUL
-		opArith, // OP_DIV
-		opArith, // OP_MOD
-		opArith, // OP_POW
+		opAdd, // OP_ADD
+		opSub, // OP_SUB
+		opMul, // OP_MUL
+		opDiv, // OP_DIV
+		opMod, // OP_MOD
+		opPow, // OP_POW
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
 			reg := L.reg
 			cf := L.currentFrame
@@ -703,9 +709,11 @@ func init() {
 			lbase := cf.LocalBase
 			A := int(inst>>18) & 0xff //GETA
 			RA := lbase + A
-			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
-				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
-					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
+			// Direct array access for performance
+			arr := reg.array
+			if init, ok1 := arr[RA].(LNumber); ok1 {
+				if limit, ok2 := arr[RA+1].(LNumber); ok2 {
+					if step, ok3 := arr[RA+2].(LNumber); ok3 {
 						init += step
 						v := LNumber(init)
 						// +inline-call reg.SetNumber RA v
@@ -734,8 +742,10 @@ func init() {
 			A := int(inst>>18) & 0xff //GETA
 			RA := lbase + A
 			Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
-			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
-				if step, ok2 := reg.Get(RA + 2).(LNumber); ok2 {
+			// Direct array access for performance
+			arr := reg.array
+			if init, ok1 := arr[RA].(LNumber); ok1 {
+				if step, ok2 := arr[RA+2].(LNumber); ok2 {
 					// +inline-call reg.SetNumber RA LNumber(init-step)
 				} else {
 					L.RaiseError("for statement step must be a number")
@@ -866,6 +876,138 @@ func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SU
 		v := objectArith(L, opcode, lhs, rhs)
 		// +inline-call reg.Set RA v
 	}
+	return 0
+}
+
+func opAdd(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 + v2
+			// +inline-call reg.SetNumber RA v
+			return 0
+		}
+	}
+	v := objectArith(L, OP_ADD, lhs, rhs)
+	// +inline-call reg.Set RA v
+	return 0
+}
+
+func opSub(L *LState, inst uint32, baseframe *callFrame) int { //OP_SUB
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 - v2
+			// +inline-call reg.SetNumber RA v
+			return 0
+		}
+	}
+	v := objectArith(L, OP_SUB, lhs, rhs)
+	// +inline-call reg.Set RA v
+	return 0
+}
+
+func opMul(L *LState, inst uint32, baseframe *callFrame) int { //OP_MUL
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 * v2
+			// +inline-call reg.SetNumber RA v
+			return 0
+		}
+	}
+	v := objectArith(L, OP_MUL, lhs, rhs)
+	// +inline-call reg.Set RA v
+	return 0
+}
+
+func opDiv(L *LState, inst uint32, baseframe *callFrame) int { //OP_DIV
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 / v2
+			// +inline-call reg.SetNumber RA v
+			return 0
+		}
+	}
+	v := objectArith(L, OP_DIV, lhs, rhs)
+	// +inline-call reg.Set RA v
+	return 0
+}
+
+func opMod(L *LState, inst uint32, baseframe *callFrame) int { //OP_MOD
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := luaModulo(v1, v2)
+			// +inline-call reg.SetNumber RA v
+			return 0
+		}
+	}
+	v := objectArith(L, OP_MOD, lhs, rhs)
+	// +inline-call reg.Set RA v
+	return 0
+}
+
+func opPow(L *LState, inst uint32, baseframe *callFrame) int { //OP_POW
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := LNumber(math.Pow(float64(v1), float64(v2)))
+			// +inline-call reg.SetNumber RA v
+			return 0
+		}
+	}
+	v := objectArith(L, OP_POW, lhs, rhs)
+	// +inline-call reg.Set RA v
 	return 0
 }
 

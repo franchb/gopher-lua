@@ -481,12 +481,18 @@ func (rg *registry) CopyRange(regv, start, limit, n int) { // +inline-start
 	if limit == -1 || limit > rg.top {
 		limit = rg.top
 	}
-	for i := 0; i < n; i++ {
-		srcIdx := start + i
-		if srcIdx >= limit || srcIdx < 0 {
-			rg.array[regv+i] = LNil
-		} else {
-			rg.array[regv+i] = rg.array[srcIdx]
+	// Fast path: entire source range is valid, use copy() builtin
+	if start >= 0 && start+n <= limit {
+		copy(rg.array[regv:regv+n], rg.array[start:start+n])
+	} else {
+		// Slow path for boundary handling
+		for i := 0; i < n; i++ {
+			srcIdx := start + i
+			if srcIdx >= limit || srcIdx < 0 {
+				rg.array[regv+i] = LNil
+			} else {
+				rg.array[regv+i] = rg.array[srcIdx]
+			}
 		}
 	}
 
@@ -1888,6 +1894,8 @@ func (ls *LState) SetHook(callback *LFunction, event string, count int) error {
 			return newApiErrorS(ApiErrorRun, fmt.Sprintf("invalid hook event: %c", c))
 		}
 	}
+	// Update combined hook flag for main loop optimization
+	ls.hasHooks = ls.lhook != nil || ls.cthook != nil
 	return nil
 }
 

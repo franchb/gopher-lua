@@ -10,13 +10,19 @@ type iface struct {
 	word unsafe.Pointer
 }
 
-const preloadLimit LNumber = 128
+// Preload cache for common integer values to avoid allocations
+const preloadLimit LNumber = 256
+const preloadNegativeLimit LNumber = 128
 
 var preloads [int(preloadLimit)]LValue
+var preloadsNegative [int(preloadNegativeLimit)]LValue
 
 func init() {
 	for i := range int(preloadLimit) {
 		preloads[i] = LNumber(i)
+	}
+	for i := range int(preloadNegativeLimit) {
+		preloadsNegative[i] = LNumber(-i - 1)
 	}
 }
 
@@ -46,9 +52,13 @@ func newAllocator(size int) *allocator {
 // The downside of this is that all of the floats on a given block have to become eligible for gc before the block
 // as a whole can be gc-ed.
 func (al *allocator) LNumber2I(v LNumber) LValue {
-	// first check for shared preloaded numbers
+	// first check for shared preloaded numbers (positive integers [0, 255])
 	if v >= 0 && v < preloadLimit && float64(v) == float64(int64(v)) {
 		return preloads[int(v)]
+	}
+	// check for shared preloaded negative numbers ([-128, -1])
+	if v < 0 && v >= -preloadNegativeLimit && float64(v) == float64(int64(v)) {
+		return preloadsNegative[int(-v)-1]
 	}
 
 	// check if we need a new alloc page

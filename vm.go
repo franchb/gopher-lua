@@ -28,11 +28,14 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		cf = L.currentFrame
 		inst = cf.Fn.Proto.Code[cf.Pc]
 		cf.Pc++
-		if L.lhook != nil {
-			L.lhook.call(L, cf)
-		}
-		if L.cthook != nil {
-			L.cthook.call(L, cf)
+		// Use combined hasHooks flag to optimize the common case (no hooks)
+		if L.hasHooks {
+			if L.lhook != nil {
+				L.lhook.call(L, cf)
+			}
+			if L.cthook != nil {
+				L.cthook.call(L, cf)
+			}
 		}
 		if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
 			return
@@ -63,11 +66,14 @@ func mainLoopWithContext(L *LState, baseframe *callFrame) {
 			L.RaiseError("%s", L.ctx.Err().Error())
 			return
 		default:
-			if L.lhook != nil {
-				L.lhook.call(L, cf)
-			}
-			if L.cthook != nil {
-				L.cthook.call(L, cf)
+			// Use combined hasHooks flag to optimize the common case (no hooks)
+			if L.hasHooks {
+				if L.lhook != nil {
+					L.lhook.call(L, cf)
+				}
+				if L.cthook != nil {
+					L.cthook.call(L, cf)
+				}
 			}
 			if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
 				return
@@ -131,12 +137,18 @@ func copyReturnValues(L *LState, regv, start, n, b int) { // +inline-start
 			if limit == -1 || limit > rg.top {
 				limit = rg.top
 			}
-			for i := 0; i < n; i++ {
-				srcIdx := start + i
-				if srcIdx >= limit || srcIdx < 0 {
-					rg.array[regv+i] = LNil
-				} else {
-					rg.array[regv+i] = rg.array[srcIdx]
+			// Fast path: entire source range is valid, use copy() builtin
+			if start >= 0 && start+n <= limit {
+				copy(rg.array[regv:regv+n], rg.array[start:start+n])
+			} else {
+				// Slow path for boundary handling
+				for i := 0; i < n; i++ {
+					srcIdx := start + i
+					if srcIdx >= limit || srcIdx < 0 {
+						rg.array[regv+i] = LNil
+					} else {
+						rg.array[regv+i] = rg.array[srcIdx]
+					}
 				}
 			}
 
@@ -251,12 +263,18 @@ func callGFunction(L *LState, tailcall bool) bool {
 		if limit == -1 || limit > rg.top {
 			limit = rg.top
 		}
-		for i := 0; i < n; i++ {
-			srcIdx := start + i
-			if srcIdx >= limit || srcIdx < 0 {
-				rg.array[regv+i] = LNil
-			} else {
-				rg.array[regv+i] = rg.array[srcIdx]
+		// Fast path: entire source range is valid, use copy() builtin
+		if start >= 0 && start+n <= limit {
+			copy(rg.array[regv:regv+n], rg.array[start:start+n])
+		} else {
+			// Slow path for boundary handling
+			for i := 0; i < n; i++ {
+				srcIdx := start + i
+				if srcIdx >= limit || srcIdx < 0 {
+					rg.array[regv+i] = LNil
+				} else {
+					rg.array[regv+i] = rg.array[srcIdx]
+				}
 			}
 		}
 
@@ -768,12 +786,12 @@ func init() {
 			}
 			return 0
 		},
-		opArith, // OP_ADD
-		opArith, // OP_SUB
-		opArith, // OP_MUL
-		opArith, // OP_DIV
-		opArith, // OP_MOD
-		opArith, // OP_POW
+		opAdd, // OP_ADD
+		opSub, // OP_SUB
+		opMul, // OP_MUL
+		opDiv, // OP_DIV
+		opMod, // OP_MOD
+		opPow, // OP_POW
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
 			reg := L.reg
 			cf := L.currentFrame
@@ -1520,12 +1538,18 @@ func init() {
 					if limit == -1 || limit > rg.top {
 						limit = rg.top
 					}
-					for i := 0; i < n; i++ {
-						srcIdx := start + i
-						if srcIdx >= limit || srcIdx < 0 {
-							rg.array[regv+i] = LNil
-						} else {
-							rg.array[regv+i] = rg.array[srcIdx]
+					// Fast path: entire source range is valid, use copy() builtin
+					if start >= 0 && start+n <= limit {
+						copy(rg.array[regv:regv+n], rg.array[start:start+n])
+					} else {
+						// Slow path for boundary handling
+						for i := 0; i < n; i++ {
+							srcIdx := start + i
+							if srcIdx >= limit || srcIdx < 0 {
+								rg.array[regv+i] = LNil
+							} else {
+								rg.array[regv+i] = rg.array[srcIdx]
+							}
 						}
 					}
 
@@ -1638,12 +1662,18 @@ func init() {
 							if limit == -1 || limit > rg.top {
 								limit = rg.top
 							}
-							for i := 0; i < n; i++ {
-								srcIdx := start + i
-								if srcIdx >= limit || srcIdx < 0 {
-									rg.array[regv+i] = LNil
-								} else {
-									rg.array[regv+i] = rg.array[srcIdx]
+							// Fast path: entire source range is valid, use copy() builtin
+							if start >= 0 && start+n <= limit {
+								copy(rg.array[regv:regv+n], rg.array[start:start+n])
+							} else {
+								// Slow path for boundary handling
+								for i := 0; i < n; i++ {
+									srcIdx := start + i
+									if srcIdx >= limit || srcIdx < 0 {
+										rg.array[regv+i] = LNil
+									} else {
+										rg.array[regv+i] = rg.array[srcIdx]
+									}
 								}
 							}
 
@@ -1748,12 +1778,18 @@ func init() {
 						if limit == -1 || limit > rg.top {
 							limit = rg.top
 						}
-						for i := 0; i < n; i++ {
-							srcIdx := start + i
-							if srcIdx >= limit || srcIdx < 0 {
-								rg.array[regv+i] = LNil
-							} else {
-								rg.array[regv+i] = rg.array[srcIdx]
+						// Fast path: entire source range is valid, use copy() builtin
+						if start >= 0 && start+n <= limit {
+							copy(rg.array[regv:regv+n], rg.array[start:start+n])
+						} else {
+							// Slow path for boundary handling
+							for i := 0; i < n; i++ {
+								srcIdx := start + i
+								if srcIdx >= limit || srcIdx < 0 {
+									rg.array[regv+i] = LNil
+								} else {
+									rg.array[regv+i] = rg.array[srcIdx]
+								}
 							}
 						}
 
@@ -1813,9 +1849,11 @@ func init() {
 			lbase := cf.LocalBase
 			A := int(inst>>18) & 0xff //GETA
 			RA := lbase + A
-			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
-				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
-					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
+			// Direct array access for performance
+			arr := reg.array
+			if init, ok1 := arr[RA].(LNumber); ok1 {
+				if limit, ok2 := arr[RA+1].(LNumber); ok2 {
+					if step, ok3 := arr[RA+2].(LNumber); ok3 {
 						init += step
 						v := LNumber(init)
 						// this section is inlined by go-inline
@@ -1911,8 +1949,10 @@ func init() {
 			A := int(inst>>18) & 0xff //GETA
 			RA := lbase + A
 			Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
-			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
-				if step, ok2 := reg.Get(RA + 2).(LNumber); ok2 {
+			// Direct array access for performance
+			arr := reg.array
+			if init, ok1 := arr[RA].(LNumber); ok1 {
+				if step, ok2 := arr[RA+2].(LNumber); ok2 {
 					// this section is inlined by go-inline
 					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
 					{
@@ -2196,12 +2236,18 @@ func init() {
 				if limit == -1 || limit > rg.top {
 					limit = rg.top
 				}
-				for i := 0; i < n; i++ {
-					srcIdx := start + i
-					if srcIdx >= limit || srcIdx < 0 {
-						rg.array[regv+i] = LNil
-					} else {
-						rg.array[regv+i] = rg.array[srcIdx]
+				// Fast path: entire source range is valid, use copy() builtin
+				if start >= 0 && start+n <= limit {
+					copy(rg.array[regv:regv+n], rg.array[start:start+n])
+				} else {
+					// Slow path for boundary handling
+					for i := 0; i < n; i++ {
+						srcIdx := start + i
+						if srcIdx >= limit || srcIdx < 0 {
+							rg.array[regv+i] = LNil
+						} else {
+							rg.array[regv+i] = rg.array[srcIdx]
+						}
 					}
 				}
 
@@ -2280,6 +2326,366 @@ func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SU
 			if regi >= rg.top {
 				rg.top = regi + 1
 			}
+		}
+	}
+	return 0
+}
+
+func opAdd(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 + v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	v := objectArith(L, OP_ADD, lhs, rhs)
+	// this section is inlined by go-inline
+	// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+	{
+		rg := reg
+		regi := RA
+		vali := v
+		newSize := regi + 1
+		// this section is inlined by go-inline
+		// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+		{
+			requiredSize := newSize
+			if requiredSize > cap(rg.array) {
+				rg.resize(requiredSize)
+			}
+		}
+		rg.array[regi] = vali
+		if regi >= rg.top {
+			rg.top = regi + 1
+		}
+	}
+	return 0
+}
+
+func opSub(L *LState, inst uint32, baseframe *callFrame) int { //OP_SUB
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 - v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	v := objectArith(L, OP_SUB, lhs, rhs)
+	// this section is inlined by go-inline
+	// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+	{
+		rg := reg
+		regi := RA
+		vali := v
+		newSize := regi + 1
+		// this section is inlined by go-inline
+		// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+		{
+			requiredSize := newSize
+			if requiredSize > cap(rg.array) {
+				rg.resize(requiredSize)
+			}
+		}
+		rg.array[regi] = vali
+		if regi >= rg.top {
+			rg.top = regi + 1
+		}
+	}
+	return 0
+}
+
+func opMul(L *LState, inst uint32, baseframe *callFrame) int { //OP_MUL
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 * v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	v := objectArith(L, OP_MUL, lhs, rhs)
+	// this section is inlined by go-inline
+	// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+	{
+		rg := reg
+		regi := RA
+		vali := v
+		newSize := regi + 1
+		// this section is inlined by go-inline
+		// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+		{
+			requiredSize := newSize
+			if requiredSize > cap(rg.array) {
+				rg.resize(requiredSize)
+			}
+		}
+		rg.array[regi] = vali
+		if regi >= rg.top {
+			rg.top = regi + 1
+		}
+	}
+	return 0
+}
+
+func opDiv(L *LState, inst uint32, baseframe *callFrame) int { //OP_DIV
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := v1 / v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	v := objectArith(L, OP_DIV, lhs, rhs)
+	// this section is inlined by go-inline
+	// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+	{
+		rg := reg
+		regi := RA
+		vali := v
+		newSize := regi + 1
+		// this section is inlined by go-inline
+		// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+		{
+			requiredSize := newSize
+			if requiredSize > cap(rg.array) {
+				rg.resize(requiredSize)
+			}
+		}
+		rg.array[regi] = vali
+		if regi >= rg.top {
+			rg.top = regi + 1
+		}
+	}
+	return 0
+}
+
+func opMod(L *LState, inst uint32, baseframe *callFrame) int { //OP_MOD
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := luaModulo(v1, v2)
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	v := objectArith(L, OP_MOD, lhs, rhs)
+	// this section is inlined by go-inline
+	// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+	{
+		rg := reg
+		regi := RA
+		vali := v
+		newSize := regi + 1
+		// this section is inlined by go-inline
+		// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+		{
+			requiredSize := newSize
+			if requiredSize > cap(rg.array) {
+				rg.resize(requiredSize)
+			}
+		}
+		rg.array[regi] = vali
+		if regi >= rg.top {
+			rg.top = regi + 1
+		}
+	}
+	return 0
+}
+
+func opPow(L *LState, inst uint32, baseframe *callFrame) int { //OP_POW
+	reg := L.reg
+	cf := L.currentFrame
+	lbase := cf.LocalBase
+	A := int(inst>>18) & 0xff //GETA
+	RA := lbase + A
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	lhs := L.rkValue(B)
+	rhs := L.rkValue(C)
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			v := LNumber(math.Pow(float64(v1), float64(v2)))
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	v := objectArith(L, OP_POW, lhs, rhs)
+	// this section is inlined by go-inline
+	// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+	{
+		rg := reg
+		regi := RA
+		vali := v
+		newSize := regi + 1
+		// this section is inlined by go-inline
+		// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+		{
+			requiredSize := newSize
+			if requiredSize > cap(rg.array) {
+				rg.resize(requiredSize)
+			}
+		}
+		rg.array[regi] = vali
+		if regi >= rg.top {
+			rg.top = regi + 1
 		}
 	}
 	return 0
