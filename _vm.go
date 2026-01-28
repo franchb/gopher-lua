@@ -1125,28 +1125,44 @@ func stringConcat(L *LState, total, last int) LValue {
 }
 
 func lessThan(L *LState, lhs, rhs LValue) bool {
-	// optimization for numbers
+	// Fast path for LNumber (most common comparison type)
 	if v1, ok1 := lhs.(LNumber); ok1 {
 		if v2, ok2 := rhs.(LNumber); ok2 {
 			return v1 < v2
 		}
 		L.RaiseError("attempt to compare %v with %v", lhs.Type().String(), rhs.Type().String())
 	}
+	// Fast path for LString (second most common)
+	if v1, ok1 := lhs.(LString); ok1 {
+		if v2, ok2 := rhs.(LString); ok2 {
+			return strCmp(string(v1), string(v2)) < 0
+		}
+		L.RaiseError("attempt to compare %v with %v", lhs.Type().String(), rhs.Type().String())
+		return false
+	}
 	if lhs.Type() != rhs.Type() {
 		L.RaiseError("attempt to compare %v with %v", lhs.Type().String(), rhs.Type().String())
 		return false
 	}
-	ret := false
-	switch lhs.Type() {
-	case LTString:
-		ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) < 0
-	default:
-		ret = objectRationalWithError(L, lhs, rhs, "__lt")
-	}
-	return ret
+	return objectRationalWithError(L, lhs, rhs, "__lt")
 }
 
 func equals(L *LState, lhs, rhs LValue, raw bool) bool {
+	// Fast path for LNumber (most common comparison type)
+	if v1, ok := lhs.(LNumber); ok {
+		if v2, ok := rhs.(LNumber); ok {
+			return v1 == v2
+		}
+		return false // different types
+	}
+	// Fast path for LString (second most common)
+	if v1, ok := lhs.(LString); ok {
+		if v2, ok := rhs.(LString); ok {
+			return string(v1) == string(v2)
+		}
+		return false // different types
+	}
+
 	lt := lhs.Type()
 	if lt != rhs.Type() {
 		return false
@@ -1156,14 +1172,8 @@ func equals(L *LState, lhs, rhs LValue, raw bool) bool {
 	switch lt {
 	case LTNil:
 		ret = true
-	case LTNumber:
-		v1, _ := lhs.(LNumber)
-		v2, _ := rhs.(LNumber)
-		ret = v1 == v2
 	case LTBool:
 		ret = bool(lhs.(LBool)) == bool(rhs.(LBool))
-	case LTString:
-		ret = string(lhs.(LString)) == string(rhs.(LString))
 	case LTUserData, LTTable:
 		if lhs == rhs {
 			ret = true

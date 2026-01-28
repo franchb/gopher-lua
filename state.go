@@ -934,6 +934,18 @@ func (ls *LState) rkString(idx int) string {
 	return string(ls.reg.array[ls.currentFrame.LocalBase+idx].(LString))
 }
 
+// kValue returns a constant value (for opcodes known to access constants)
+// This skips the bitwise check that rkValue does
+func (ls *LState) kValue(idx int) LValue { // +inline-start
+	return ls.currentFrame.Fn.Proto.Constants[idx]
+} // +inline-end
+
+// rValue returns a register value (for opcodes known to access registers)
+// This skips the bitwise check that rkValue does
+func (ls *LState) rValue(idx int) LValue { // +inline-start
+	return ls.reg.array[ls.currentFrame.LocalBase+idx]
+} // +inline-end
+
 func (ls *LState) closeUpvalues(idx int) { // +inline-start
 	if ls.uvcache != nil {
 		var prev *Upvalue
