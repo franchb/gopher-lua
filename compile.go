@@ -5,7 +5,7 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/epikur-io/gopher-lua/ast"
+	"github.com/franchb/gopher-lua/ast"
 )
 
 /* internal constants & structs  {{{ */
@@ -109,7 +109,7 @@ func savereg(ec *expcontext, reg int) int {
 	return ec.reg
 }
 
-func raiseCompileError(context *funcContext, line int, format string, args ...interface{}) {
+func raiseCompileError(context *funcContext, line int, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	panic(&CompileError{context: context, Line: line, Message: msg})
 }

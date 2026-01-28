@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/epikur-io/gopher-lua/pm"
+	"github.com/franchb/gopher-lua/pm"
 )
 
 const emptyLString LString = LString("")
@@ -114,7 +114,7 @@ func strFind(L *LState) int {
 
 	mds, err := pm.Find(pattern, unsafeFastStringToReadOnlyBytes(str), init, 1)
 	if err != nil {
-		L.RaiseError(err.Error())
+		L.RaiseError("%s", err.Error())
 	}
 	if len(mds) == 0 {
 		L.Push(LNil)
@@ -135,7 +135,7 @@ func strFind(L *LState) int {
 
 func strFormat(L *LState) int {
 	str := L.CheckString(1)
-	args := make([]interface{}, L.GetTop()-1)
+	args := make([]any, L.GetTop()-1)
 	top := L.GetTop()
 	for i := 2; i <= top; i++ {
 		args[i-2] = L.Get(i)
@@ -154,7 +154,7 @@ func strGsub(L *LState) int {
 
 	mds, err := pm.Find(pat, unsafeFastStringToReadOnlyBytes(str), 0, limit)
 	if err != nil {
-		L.RaiseError(err.Error())
+		L.RaiseError("%s", err.Error())
 	}
 	if len(mds) == 0 {
 		L.SetTop(1)
@@ -329,7 +329,7 @@ func strGmatch(L *LState) int {
 	pattern := L.CheckString(2)
 	mds, err := pm.Find(pattern, []byte(str), 0, -1)
 	if err != nil {
-		L.RaiseError(err.Error())
+		L.RaiseError("%s", err.Error())
 	}
 	L.Push(L.Get(UpvalueIndex(1)))
 	ud := L.NewUserData()
@@ -365,7 +365,7 @@ func strMatch(L *LState) int {
 
 	mds, err := pm.Find(pattern, unsafeFastStringToReadOnlyBytes(str), offset, 1)
 	if err != nil {
-		L.RaiseError(err.Error())
+		L.RaiseError("%s", err.Error())
 	}
 	if len(mds) == 0 {
 		L.Push(LNil)

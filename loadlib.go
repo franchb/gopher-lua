@@ -35,7 +35,7 @@ func loFindFile(L *LState, name, pname string) (string, string) {
 		L.RaiseError("package.%s must be a string", pname)
 	}
 	messages := []string{}
-	for _, pattern := range strings.Split(string(path), ";") {
+	for pattern := range strings.SplitSeq(string(path), ";") {
 		luapath := strings.Replace(pattern, "?", name, -1)
 		if _, err := os.Stat(luapath); err == nil {
 			return luapath, ""
@@ -101,7 +101,7 @@ func loLoaderLua(L *LState) int {
 	}
 	fn, err1 := L.LoadFile(path)
 	if err1 != nil {
-		L.RaiseError(err1.Error())
+		L.RaiseError("%s", err1.Error())
 	}
 	L.Push(fn)
 	return 1

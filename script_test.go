@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/epikur-io/gopher-lua/parse"
+	"github.com/franchb/gopher-lua/parse"
 )
 
 const maxMemory = 40
